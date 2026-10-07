@@ -25,6 +25,7 @@ dependencies = [
     "numpy",
     "pandas",
     "matplotlib",
+    "imageio",
     "scipy",
     "scikit-image",
     "networkx",

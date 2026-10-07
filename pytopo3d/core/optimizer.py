@@ -13,7 +13,7 @@ Changes relative to the previous refactor
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import scipy.sparse as sp
@@ -47,8 +47,48 @@ def _make_scatter_map(i_full, j_full, ndof):
     return i_uniq, j_uniq, dup2uniq
 
 
+def _build_force_matrix(
+    nelx: int,
+    nely: int,
+    nelz: int,
+    ndof: int,
+    force_field: Optional[np.ndarray],
+    force_fields: Optional[Union[np.ndarray, Sequence[np.ndarray]]],
+) -> np.ndarray:
+    if force_field is not None and force_fields is not None:
+        raise ValueError("Specify either force_field or force_fields, not both.")
+
+    if force_fields is None:
+        fields = (force_field,)
+    else:
+        expected_shape = (nely, nelx, nelz, 3)
+        try:
+            fields_array = np.asarray(force_fields, dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "force_fields must be a rectangular array of force fields."
+            ) from exc
+        if fields_array.ndim == 4:
+            fields_array = fields_array[None, ...]
+        if fields_array.ndim != 5 or fields_array.shape[1:] != expected_shape:
+            raise ValueError(
+                f"force_fields must have shape (nloads, {nely}, {nelx}, {nelz}, 3); "
+                f"got {fields_array.shape}."
+            )
+        if fields_array.shape[0] == 0:
+            raise ValueError("force_fields must contain at least one load case.")
+        if not np.isfinite(fields_array).all():
+            raise ValueError("force_fields must contain only finite values.")
+        fields = tuple(fields_array[i] for i in range(fields_array.shape[0]))
+
+    force_vectors = [
+        build_force_vector(nelx, nely, nelz, ndof, field) for field in fields
+    ]
+    return np.stack(force_vectors, axis=1)
+
+
 # ──────────────────────────────────────────────────────────────────────────
-def top3d(
+def _top3d(
     nelx: int,
     nely: int,
     nelz: int,
@@ -64,6 +104,7 @@ def top3d(
     save_history: bool = False,
     history_frequency: int = 10,
     use_gpu: bool = False,
+    force_fields: Optional[Union[np.ndarray, Sequence[np.ndarray]]] = None,
 ) -> Union[np.ndarray, Tuple[np.ndarray, Dict[str, Any]]]:
     # ─────────────────────── setup
     gpu = HAS_CUPY and use_gpu
@@ -92,7 +133,9 @@ def top3d(
     )
 
     # Force / supports
-    F = build_force_vector(nelx, nely, nelz, ndof, force_field)
+    F = _build_force_matrix(
+        nelx, nely, nelz, ndof, force_field, force_fields
+    )
     freedofs0, _ = build_supports(nelx, nely, nelz, ndof, support_mask)
 
     # Element stiffness
@@ -111,7 +154,6 @@ def top3d(
         F_gpu = cp.asarray(F)
         freedofs0_gpu = cp.asarray(freedofs0)
         obstacle_gpu = cp.asarray(obstacle_mask)
-        U_gpu = cp.zeros(ndof)
 
     # Filter
     H, Hs = build_filter(nelx, nely, nelz, rmin)
@@ -195,16 +237,26 @@ def top3d(
             K_gpu.data.fill(0.0)
             cp.add.at(K_gpu.data, dup2uniq_gpu, elem_vals_gpu)
 
-            # Solve
+            # Solve every load case against the same stiffness matrix.
             Kff_gpu = K_gpu[freedofs0_gpu, :][:, freedofs0_gpu]
-            Uf_gpu = solver_func(Kff_gpu, F_gpu[freedofs0_gpu])
-            U_gpu.fill(0)
-            U_gpu[freedofs0_gpu] = Uf_gpu
+            ce_gpu = cp.zeros_like(xPhys_gpu)
+            for load_case in range(F_gpu.shape[1]):
+                Uf_gpu = solver_func(
+                    Kff_gpu, F_gpu[freedofs0_gpu, load_case]
+                )
+                U_gpu = cp.zeros(ndof)
+                U_gpu[freedofs0_gpu] = Uf_gpu
+                ce_flat_gpu = element_compliance(
+                    U_gpu, cp.asarray(edofMat), KE_gpu
+                )
+                ce_gpu += ce_flat_gpu.reshape(
+                    nely, nelx, nelz, order="F"
+                )
 
-            # Compliance & sensitivities
-            ce_flat_gpu = element_compliance(U_gpu, cp.asarray(edofMat), KE_gpu)
-            ce_gpu = ce_flat_gpu.reshape(nely, nelx, nelz, order="F")
-            c = cp.sum((Emin + xPhys_gpu ** penal * (E0 - Emin)) * ce_gpu).item()
+            # Compliance & sensitivities are summed across load cases.
+            c = cp.sum(
+                (Emin + xPhys_gpu ** penal * (E0 - Emin)) * ce_gpu
+            ).item()
 
             dc_gpu = -penal * (E0 - Emin) * xPhys_gpu ** (penal - 1) * ce_gpu
             dv_gpu = cp.ones_like(xPhys_gpu)
@@ -277,3 +329,83 @@ def top3d(
     if save_history:
         return final_xPhys, history
     return final_xPhys
+
+
+def top3d(
+    nelx: int,
+    nely: int,
+    nelz: int,
+    volfrac: float,
+    penal: float,
+    rmin: float,
+    disp_thres: float,
+    obstacle_mask: Optional[np.ndarray] = None,
+    force_field: Optional[np.ndarray] = None,
+    support_mask: Optional[np.ndarray] = None,
+    tolx: float = 0.01,
+    maxloop: int = 2000,
+    save_history: bool = False,
+    history_frequency: int = 10,
+    use_gpu: bool = False,
+) -> Union[np.ndarray, Tuple[np.ndarray, Dict[str, Any]]]:
+    """Optimize for the default or a single element-based load case."""
+    return _top3d(
+        nelx=nelx,
+        nely=nely,
+        nelz=nelz,
+        volfrac=volfrac,
+        penal=penal,
+        rmin=rmin,
+        disp_thres=disp_thres,
+        obstacle_mask=obstacle_mask,
+        force_field=force_field,
+        support_mask=support_mask,
+        tolx=tolx,
+        maxloop=maxloop,
+        save_history=save_history,
+        history_frequency=history_frequency,
+        use_gpu=use_gpu,
+    )
+
+
+def top3d_multi(
+    nelx: int,
+    nely: int,
+    nelz: int,
+    volfrac: float,
+    penal: float,
+    rmin: float,
+    disp_thres: float,
+    force_fields: Union[np.ndarray, Sequence[np.ndarray]],
+    obstacle_mask: Optional[np.ndarray] = None,
+    support_mask: Optional[np.ndarray] = None,
+    tolx: float = 0.01,
+    maxloop: int = 2000,
+    save_history: bool = False,
+    history_frequency: int = 10,
+    use_gpu: bool = False,
+) -> Union[np.ndarray, Tuple[np.ndarray, Dict[str, Any]]]:
+    """Optimize a single design for multiple element-based load cases.
+
+    ``force_fields`` has shape ``(nloads, nely, nelx, nelz, 3)`` (or is a
+    sequence of ``(nely, nelx, nelz, 3)`` arrays). The objective is the sum
+    of the compliance for every load case, matching the reference multi-load
+    SIMP formulation. A single 4D force field is also accepted.
+    """
+    return _top3d(
+        nelx=nelx,
+        nely=nely,
+        nelz=nelz,
+        volfrac=volfrac,
+        penal=penal,
+        rmin=rmin,
+        disp_thres=disp_thres,
+        obstacle_mask=obstacle_mask,
+        support_mask=support_mask,
+        tolx=tolx,
+        maxloop=maxloop,
+        save_history=save_history,
+        history_frequency=history_frequency,
+        use_gpu=use_gpu,
+        force_fields=force_fields,
+    )

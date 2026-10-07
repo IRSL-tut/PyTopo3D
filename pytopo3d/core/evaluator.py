@@ -87,18 +87,22 @@ class ComplianceEvaluator:
         self.K.data[:] = 0.0
         np.add.at(self.K.data, self.dup2uniq, elem_vals)
 
-        # Solve on the free DOFs.
+        # Solve each load case on the same stiffness matrix and sum their
+        # compliance contributions, as required by the multiple-load objective.
         Kff = self.K[self.freedofs0, :][:, self.freedofs0]
-        Uf = self.solver_func(Kff, self.F[self.freedofs0])
-        U = np.zeros(self.ndof)
-        U[self.freedofs0] = Uf
+        loads = self.F[:, None] if self.F.ndim == 1 else self.F
+        c = 0.0
+        dc = np.zeros(self.shape, dtype=xPhys.dtype)
+        for load_case in range(loads.shape[1]):
+            Uf = self.solver_func(Kff, loads[self.freedofs0, load_case])
+            U = np.zeros(self.ndof)
+            U[self.freedofs0] = Uf
 
-        # Compliance and raw (unfiltered) sensitivities.
-        ce = element_compliance(U, self.edofMat, self.KE).reshape(
-            nely, nelx, nelz, order="F"
-        )
-        c = ((Emin + xPhys ** penal * (E0 - Emin)) * ce).sum()
-        dc = -penal * (E0 - Emin) * xPhys ** (penal - 1) * ce
+            ce = element_compliance(U, self.edofMat, self.KE).reshape(
+                nely, nelx, nelz, order="F"
+            )
+            c += ((Emin + xPhys ** penal * (E0 - Emin)) * ce).sum()
+            dc -= penal * (E0 - Emin) * xPhys ** (penal - 1) * ce
         dv = np.ones_like(xPhys)
 
         # Density-filter chain rule, then zero obstacle elements.

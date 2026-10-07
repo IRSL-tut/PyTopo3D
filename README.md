@@ -140,6 +140,32 @@ result = top3d(nelx, nely, nelz, 0.3, 3.0, 1.5, 0.5, force_field=force_field)
 
 Note: `force_field` is **element**-based — `build_force_vector` spreads each element's force over its 8 corner nodes — so this loads the tip *elements* rather than the exact nodal edge that MATLAB `top3d` uses (the total magnitude also differs). It reproduces the load direction and bending plane, which is what matters for orientation comparison, not `top3d`'s exact nodal load.
 
+#### Multiple load cases
+
+Use `top3d_multi` to optimize one design for several load cases. Each case uses the same
+support conditions and design domain, and the objective is the **sum** of the individual
+compliances and their sensitivities:
+
+```python
+import numpy as np
+from pytopo3d.core.optimizer import top3d_multi
+
+nelx, nely, nelz = 32, 16, 8
+force_fields = np.zeros((2, nely, nelx, nelz, 3))
+force_fields[0, 0, nelx - 1, :, 1] = -1.0  # case 1: downward Fy load
+force_fields[1, -1, nelx - 1, :, 2] = -1.0  # case 2: Fz load at the opposite y edge
+
+result = top3d_multi(
+    nelx, nely, nelz, volfrac=0.3, penal=3.0, rmin=1.5, disp_thres=0.5,
+    force_fields=force_fields,
+)
+```
+
+`force_fields` may be a 5D array with shape `(nloads, nely, nelx, nelz, 3)`, a sequence
+of 4D `(nely, nelx, nelz, 3)` arrays, or one 4D field. The same obstacle and support
+masks apply to every case. The implementation follows the reference
+[multiple-load-cases formulation](https://www.top3d.app/tutorials/multiple-load-cases-top3d).
+
 ### Command-line Interface
 
 To run a basic optimization:
