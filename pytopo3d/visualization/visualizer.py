@@ -122,6 +122,7 @@ def visualize_final_result(
     combined_obstacle_mask: Optional[np.ndarray] = None,
     loads_array: Optional[np.ndarray] = None,
     constraints_array: Optional[np.ndarray] = None,
+    filename: str = "optimized_design_with_boundary_conditions",
 ) -> str:
     """
     Create and save visualization of the final optimization result.
@@ -138,6 +139,7 @@ def visualize_final_result(
         combined_obstacle_mask: Combined obstacle and design space mask
         loads_array: Array showing load positions
         constraints_array: Array showing constraint positions
+        filename: Base name for the saved visualization
 
     Returns:
         Path to the saved visualization
@@ -166,7 +168,7 @@ def visualize_final_result(
         alphas=combined_alphas,  # Add transparency
         experiment_name=experiment_name,
         results_mgr=results_mgr,
-        filename="optimized_design_with_boundary_conditions",
+        filename=filename,
         title="Optimized Design with Boundary Conditions",
     )
     if logger:
