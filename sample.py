@@ -26,8 +26,8 @@ disp_thres = 0.5 # 固体判定しきい値
 force_field = np.zeros((nely, nelx, nelz, 3), dtype=np.float64)
 x_start = int(nelx * 0.75)  # 壁から離れた先端側
 #force_field[5:25, x_start:nelx, 0:2, 2] = -1.0  # -z 方向荷重
-force_field[5:25, x_start:nelx, 0:2, 2] = -0.4  # -z 方向荷重
-force_field[5:25, x_start:nelx, 0:2, 0] = -0.4  # -y 方向荷重
+force_field[5:25, x_start:nelx, 0:2, 2] = -0.2  # -z 方向荷重
+force_field[5:25, x_start:nelx, 0:2, 0] = -0.2  # -y 方向荷重
 
 # --------------------------------------------------
 # 3. 障害物マスク (干渉領域のくり抜き)
@@ -70,33 +70,34 @@ optimization_result = top3d(
     obstacle_mask=obstacle_mask,
     force_field=force_field,
     support_mask=constraints_array.astype(bool),
-    maxloop=50,
+    tolx=0.15,
+    maxloop=1000,
     save_history=True,
-    history_frequency=1,
+    history_frequency=10,
     use_gpu=True,
 )
 if not isinstance(optimization_result, tuple):
     raise RuntimeError("top3d did not return optimization history.")
 density_result, optimization_history = optimization_result
 
-for iteration, density_frame in zip(
-    optimization_history["iteration_history"],
-    optimization_history["density_history"],
-):
-    iteration_viz_path = visualize_final_result(
-        nelx=nelx,
-        nely=nely,
-        nelz=nelz,
-        experiment_name=experiment_name,
-        disp_thres=disp_thres,
-        results_mgr=results_mgr,
-        xPhys=density_frame,
-        combined_obstacle_mask=obstacle_mask,
-        loads_array=loads_array,
-        constraints_array=constraints_array,
-        filename=f"optimized_design_with_boundary_conditions{iteration:03d}",
-    )
-    print(f"Iteration {iteration} の可視化を出力しました: {iteration_viz_path}")
+#>for iteration, density_frame in zip(
+#>    optimization_history["iteration_history"],
+#>    optimization_history["density_history"],
+#>):
+#>    iteration_viz_path = visualize_final_result(
+#>        nelx=nelx,
+#>        nely=nely,
+#>        nelz=nelz,
+#>        experiment_name=experiment_name,
+#>        disp_thres=disp_thres,
+#>        results_mgr=results_mgr,
+#>        xPhys=density_frame,
+#>        combined_obstacle_mask=obstacle_mask,
+#>        loads_array=loads_array,
+#>        constraints_array=constraints_array,
+#>        filename=f"optimized_design_with_boundary_conditions{iteration:03d}",
+#>    )
+#>    print(f"Iteration {iteration} の可視化を出力しました: {iteration_viz_path}")
 
 result_viz_path = visualize_final_result(
     nelx=nelx,
@@ -122,8 +123,10 @@ voxel_to_stl(
     density_result,
     output_file=output_stl,
     level=disp_thres,
-    smooth_mesh=True,
-    smooth_iterations=10
+    padding=1, ## default 1
+    fix_mesh=False, ## default True
+    smooth_mesh=False, ## default True
+    smooth_iterations=10, ## default 5
 )
 
 print(f"STLファイルを出力しました: {output_stl}")
