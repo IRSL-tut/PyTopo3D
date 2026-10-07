@@ -14,9 +14,9 @@ nelx = 60  # x方向（垂直壁から離れる奥行き）
 nely = 30  # y方向（幅）
 nelz = 40  # z方向（高さ）
 
-volfrac = 0.25   # 体積比率（25%）
-penal = 3.0      # SIMPペナルティ係数
-rmin = 2.5       # フィルタ半径
+volfrac = 0.25 # 体積比率（25%）
+penal   = 3.0  # SIMPペナルティ係数
+rmin    = 2.5  # フィルタ半径
 disp_thres = 0.5 # 固体判定しきい値
 
 # --------------------------------------------------
@@ -70,7 +70,7 @@ density_result = top3d_multi(
     obstacle_mask=obstacle_mask,
     force_fields=force_fields,
     support_mask=constraints_array.astype(bool),
-    maxloop=200,
+    maxloop=50,
     use_gpu=True,
 )
 

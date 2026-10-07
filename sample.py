@@ -14,9 +14,9 @@ nelx = 60  # x方向（垂直壁から離れる奥行き）
 nely = 30  # y方向（幅）
 nelz = 40  # z方向（高さ）
 
-volfrac = 0.25   # 体積比率（25%）
-penal = 3.0      # SIMPペナルティ係数
-rmin = 2.5       # フィルタ半径
+volfrac = 0.25 # 体積比率（25%）
+penal   = 3.0  # SIMPペナルティ係数
+rmin    = 2.5  # フィルタ半径
 disp_thres = 0.5 # 固体判定しきい値
 
 # --------------------------------------------------
@@ -59,7 +59,7 @@ print(f"初期条件の可視化を出力しました: {setup_viz_path}")
 # 4. 最適化計算の実行
 # --------------------------------------------------
 print("トポロジー最適化を実行中...")
-density_result = top3d(
+optimization_result = top3d(
     nelx=nelx,
     nely=nely,
     nelz=nelz,
@@ -71,8 +71,32 @@ density_result = top3d(
     force_field=force_field,
     support_mask=constraints_array.astype(bool),
     maxloop=50,
+    save_history=True,
+    history_frequency=1,
     use_gpu=True,
 )
+if not isinstance(optimization_result, tuple):
+    raise RuntimeError("top3d did not return optimization history.")
+density_result, optimization_history = optimization_result
+
+for iteration, density_frame in zip(
+    optimization_history["iteration_history"],
+    optimization_history["density_history"],
+):
+    iteration_viz_path = visualize_final_result(
+        nelx=nelx,
+        nely=nely,
+        nelz=nelz,
+        experiment_name=experiment_name,
+        disp_thres=disp_thres,
+        results_mgr=results_mgr,
+        xPhys=density_frame,
+        combined_obstacle_mask=obstacle_mask,
+        loads_array=loads_array,
+        constraints_array=constraints_array,
+        filename=f"optimized_design_with_boundary_conditions{iteration:03d}",
+    )
+    print(f"Iteration {iteration} の可視化を出力しました: {iteration_viz_path}")
 
 result_viz_path = visualize_final_result(
     nelx=nelx,
